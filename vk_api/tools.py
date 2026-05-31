@@ -1,20 +1,34 @@
 # -*- coding: utf-8 -*-
 """
-:authors: python273
+:authors: python273, aaxnet
 :license: Apache License, Version 2.0, see LICENSE file
-
-:copyright: (c) 2019 python273
+:copyright: (c) 2019 python273, 2024 aaxnet
 """
+
+from __future__ import annotations
+import typing as t
 
 from .exceptions import ApiError, VkToolsException
 from .execute import VkFunction
 
 
-class VkTools(object):
-    """ Содержит некоторые вспомогательные функции, которые могут понадобиться
-    при использовании API
+class VkTools:
+    """Вспомогательные функции для VK API
 
-    :param vk: Объект :class:`VkApi`
+    :param vk: Объект :class:`VkApi` или :class:`VkApiMethod`
+
+    Пример::
+
+        import vk_api
+        from vk_api.tools import VkTools
+
+        vk_session = vk_api.VkApi(token='...')
+        vk = vk_session.get_api()
+        tools = VkTools(vk_session)
+
+        # Получить все посты стены
+        all_posts = tools.get_all('wall.get', 100, {'owner_id': -1})
+        print(f'Всего постов: {all_posts[\"count\"]}')
     """
 
     __slots__ = ('vk',)
@@ -22,37 +36,38 @@ class VkTools(object):
     def __init__(self, vk):
         self.vk = vk
 
-    def get_all_iter(self, method, max_count, values=None, key='items',
-                     limit=None, stop_fn=None, negative_offset=False):
-        """ Получить все элементы.
+    def get_all_iter(
+        self,
+        method: str,
+        max_count: int,
+        values: t.Optional[dict] = None,
+        key: str = 'items',
+        limit: t.Optional[int] = None,
+        stop_fn: t.Optional[t.Callable] = None,
+        negative_offset: bool = False
+    ) -> t.Iterator:
+        """Получить все элементы постранично (итератор).
 
-        Работает в методах, где в ответе есть count и items или users.
-        За один запрос получает max_count * 25 элементов
+        Используйте этот метод если нужно обрабатывать данные по мере получения,
+        без загрузки всего в память. За один запрос к execute получает до
+        max_count * 25 элементов.
 
-        :param method: имя метода
-        :type method: str
+        :param method: Название метода API (например 'wall.get')
+        :param max_count: Максимум элементов за один запрос к этому методу
+        :param values: Дополнительные параметры запроса
+        :param key: Ключ элементов в ответе (обычно 'items' или 'users')
+        :param limit: Ограничение общего количества элементов
+        :param stop_fn: Функция остановки — принимает список элементов,
+            возвращает True если нужно остановиться
+        :param negative_offset: True если offset должен быть отрицательным
+        :yields: Элементы ответа
 
-        :param max_count: максимальное количество элементов, которое можно
-                          получить за один запрос
-        :type max_count: int
+        Пример::
 
-        :param values: параметры
-        :type values: dict
-
-        :param key: ключ элементов, которые нужно получить
-        :type key: str
-
-        :param limit: ограничение на количество получаемых элементов,
-                            но может прийти больше
-        :type limit: int
-
-        :param stop_fn: функция, отвечающая за выход из цикла
-        :type stop_fn: func
-
-        :param negative_offset: True если offset должен быть отрицательный
-        :type negative_offset: bool
+            tools = VkTools(vk_session)
+            for post in tools.get_all_iter('wall.get', 100, {'owner_id': -1}):
+                print(post['text'])
         """
-
         values = values.copy() if values else {}
         values['count'] = max_count
 
@@ -68,15 +83,14 @@ class VkTools(object):
 
             if 'execute_errors' in response:
                 raise VkToolsException(
-                    'Could not load items: {}'.format(
+                    'Не удалось загрузить элементы: {}'.format(
                         response['execute_errors']
                     ),
                     response=response
                 )
 
             response = response['response']
-
-            items = response["items"]
+            items = response['items']
             items_count += len(items)
 
             for item in items:
@@ -94,63 +108,70 @@ class VkTools(object):
             count = response['count']
             offset = response['offset']
 
-    def get_all(self, method, max_count, values=None, key='items', limit=None,
-                stop_fn=None, negative_offset=False):
-        """ Использовать только если нужно загрузить все объекты в память.
+    def get_all(
+        self,
+        method: str,
+        max_count: int,
+        values: t.Optional[dict] = None,
+        key: str = 'items',
+        limit: t.Optional[int] = None,
+        stop_fn: t.Optional[t.Callable] = None,
+        negative_offset: bool = False
+    ) -> dict:
+        """Получить все элементы в память.
 
-        Eсли вы можете обрабатывать объекты по частям, то лучше
-        использовать get_all_iter
+        Загружает все элементы сразу. Используйте :meth:`get_all_iter`
+        если не нужны все данные сразу (экономия памяти).
 
-        Например если вы записываете объекты в БД, то нет смысла загружать
-        все данные в память
+        :param method: Название метода API
+        :param max_count: Максимум элементов за один запрос
+        :param values: Параметры запроса
+        :param key: Ключ элементов в ответе
+        :param limit: Ограничение количества
+        :param stop_fn: Функция остановки
+        :param negative_offset: Отрицательный offset
+        :return: Словарь {'count': N, key: [...]}
+
+        Пример::
+
+            result = tools.get_all('friends.get', 200, {'user_id': 1})
+            print(f'Друзей: {result[\"count\"]}')
         """
-
-        items = list(
-            self.get_all_iter(
-                method, max_count, values, key, limit, stop_fn, negative_offset
-            )
-        )
-
+        items = list(self.get_all_iter(
+            method, max_count, values, key, limit, stop_fn, negative_offset
+        ))
         return {'count': len(items), key: items}
 
-    def get_all_slow_iter(self, method, max_count, values=None, key='items',
-                          limit=None, stop_fn=None, negative_offset=False):
-        """ Получить все элементы (без использования execute)
+    def get_all_slow_iter(
+        self,
+        method: str,
+        max_count: int,
+        values: t.Optional[dict] = None,
+        key: str = 'items',
+        limit: t.Optional[int] = None,
+        stop_fn: t.Optional[t.Callable] = None,
+        negative_offset: bool = False
+    ) -> t.Iterator:
+        """Получить все элементы без использования execute (итератор).
 
-        Работает в методах, где в ответе есть count и items или users
+        Медленнее, чем :meth:`get_all_iter`, но не использует метод execute.
+        Подходит для API-методов, не поддерживаемых через execute.
 
-        :param method: имя метода
-        :type method: str
-
-        :param max_count: максимальное количество элементов, которое можно
-                          получить за один запрос
-        :type max_count: int
-
-        :param values: параметры
-        :type values: dict
-
-        :param key: ключ элементов, которые нужно получить
-        :type key: str
-
-        :param limit: ограничение на количество получаемых элементов,
-                            но может прийти больше
-        :type limit: int
-
-        :param stop_fn: функция, отвечающая за выход из цикла
-        :type stop_fn: func
-
-        :param negative_offset: True если offset должен быть отрицательный
-        :type negative_offset: bool
+        :param method: Название метода API
+        :param max_count: Максимум элементов за один запрос
+        :param values: Параметры запроса
+        :param key: Ключ элементов в ответе
+        :param limit: Ограничение количества
+        :param stop_fn: Функция остановки
+        :param negative_offset: Отрицательный offset
+        :yields: Элементы ответа
         """
-
         values = values.copy() if values else {}
         values['count'] = max_count
 
         offset_mul = -1 if negative_offset else 1
-
         offset = max_count if negative_offset else 0
         count = None
-
         items_count = 0
 
         while count is None or offset < count:
@@ -158,7 +179,6 @@ class VkTools(object):
             response = self.vk.method(method, values)
 
             new_count = response['count']
-
             count_diff = (new_count - count) if count is not None else 0
 
             if count_diff < 0:
@@ -185,25 +205,41 @@ class VkTools(object):
             offset += max_count
             count = new_count
 
-    def get_all_slow(self, method, max_count, values=None, key='items',
-                     limit=None, stop_fn=None, negative_offset=False):
-        """ Использовать только если нужно загрузить все объекты в память.
+    def get_all_slow(
+        self,
+        method: str,
+        max_count: int,
+        values: t.Optional[dict] = None,
+        key: str = 'items',
+        limit: t.Optional[int] = None,
+        stop_fn: t.Optional[t.Callable] = None,
+        negative_offset: bool = False
+    ) -> dict:
+        """Получить все элементы в память (без execute).
 
-        Eсли вы можете обрабатывать объекты по частям, то лучше
-        использовать get_all_slow_iter
-
-        Например если вы записываете объекты в БД, то нет смысла загружать
-        все данные в память
+        :return: Словарь {'count': N, key: [...]}
         """
-
-        items = list(
-            self.get_all_slow_iter(
-                method, max_count, values, key, limit, stop_fn, negative_offset
-            )
-        )
+        items = list(self.get_all_slow_iter(
+            method, max_count, values, key, limit, stop_fn, negative_offset
+        ))
         return {'count': len(items), key: items}
 
+    def get_all_with_count(
+        self,
+        method: str,
+        max_count: int,
+        values: t.Optional[dict] = None,
+        key: str = 'items',
+    ) -> t.Tuple[int, list]:
+        """Удобная версия get_all, возвращающая кортеж (count, items)
 
+        :return: (общее_количество, список_элементов)
+        """
+        result = self.get_all(method, max_count, values, key)
+        return result['count'], result[key]
+
+
+# VKScript функция для быстрого получения всех элементов через execute
 vk_get_all_items = VkFunction(
     args=('method', 'key', 'values', 'count', 'offset', 'offset_mul'),
     clean_args=('method', 'key', 'offset', 'offset_mul'),

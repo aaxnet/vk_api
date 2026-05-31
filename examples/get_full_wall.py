@@ -1,45 +1,42 @@
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
+"""
+Пример получения всех постов со стены пользователя или группы.
+Использует метод execute для ускорения (25 запросов за одно обращение).
+"""
+
 import vk_api
+from vk_api.tools import VkTools
 
 
 def main():
-    """ Пример получения всех постов со стены """
+    vk_session = vk_api.VkApi(token='ваш_токен')
+    vk = vk_session.get_api()
+    tools = VkTools(vk_session)
 
-    login, password = 'python@vk.com', 'mypassword'
-    vk_session = vk_api.VkApi(login, password)
+    owner_id = -1  # -1 = группа VK, положительное = пользователь
 
-    try:
-        vk_session.auth(token_only=True)
-    except vk_api.AuthError as error_msg:
-        print(error_msg)
-        return
+    print(f'Загружаю посты для owner_id={owner_id}...')
 
-    tools = vk_api.VkTools(vk_session)
+    # ─── Способ 1: загрузить всё в память (для небольших стен) ───────────
+    result = tools.get_all('wall.get', 100, {'owner_id': owner_id})
+    print(f'Всего постов: {result["count"]}')
 
-    """ VkTools.get_all позволяет получить все объекты со всех страниц.
-        Соответственно get_all используется только если метод принимает
-        параметры: count и offset.
+    # ─── Способ 2: итератор (рекомендуется для больших стен) ─────────────
+    print('\nПоследние 10 постов:')
+    count = 0
+    for post in tools.get_all_iter('wall.get', 100, {'owner_id': owner_id}):
+        text = post.get('text', '').strip()
+        date = post.get('date', 0)
+        print(f"  [{post['id']}] {text[:80]}")
+        count += 1
+        if count >= 10:
+            break
 
-        Например может использоваться для получения всех постов стены,
-        всех диалогов, всех сообщений, etc.
-
-        При использовании get_all сокращается количество запросов к API
-        за счет метода execute в 25 раз.
-
-        Например за раз со стены можно получить 100 * 25 = 2500, где
-        100 - максимальное количество постов, которое можно получить за один
-        запрос (обычно написано на странице с описанием метода)
-    """
-
-    wall = tools.get_all('wall.get', 100, {'owner_id': 1})
-
-    print('Posts count:', wall['count'])
-
-    if wall['count']:
-        print('First post:', wall['items'][0], '\n')
-
-    if wall['count'] > 1:
-        print('Last post:', wall['items'][-1])
+    # ─── Способ 3: медленный (без execute) — например для частных API ────
+    print('\nМедленный способ (без execute):')
+    slow_result = tools.get_all_slow('wall.get', 100, {'owner_id': owner_id}, limit=5)
+    print(f'Получено: {slow_result["count"]} постов')
 
 
 if __name__ == '__main__':

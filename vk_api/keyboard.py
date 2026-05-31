@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-:authors: python273, Helow19274, prostomarkeloff
+:authors: python273, Helow19274, prostomarkeloff, aaxnet
 :license: Apache License, Version 2.0, see LICENSE file
-:copyright: (c) 2019 python273
+:copyright: (c) 2019 python273, 2024 aaxnet
 """
 
+from __future__ import annotations
 from enum import Enum
-
+from typing import Optional, Union
 
 from .utils import sjson_dumps
 
@@ -17,52 +18,80 @@ MAX_INLINE_LINES = 6
 
 
 class VkKeyboardColor(Enum):
-    """ Возможные цвета кнопок """
+    """Цвета кнопок клавиатуры"""
 
-    #: Синяя
+    #: Синяя (основное действие)
     PRIMARY = 'primary'
 
-    #: Белая
+    #: Белая (вторичное действие)
     SECONDARY = 'secondary'
 
-    #: Красная
+    #: Красная (опасное действие)
     NEGATIVE = 'negative'
 
-    #: Зелёная
+    #: Зелёная (положительное действие)
     POSITIVE = 'positive'
 
 
 class VkKeyboardButton(Enum):
-    """ Возможные типы кнопки """
+    """Типы кнопок клавиатуры"""
 
     #: Кнопка с текстом
-    TEXT = "text"
+    TEXT = 'text'
 
     #: Кнопка с местоположением
-    LOCATION = "location"
+    LOCATION = 'location'
 
-    #: Кнопка с оплатой через VKPay
-    VKPAY = "vkpay"
+    #: Кнопка с оплатой VKPay
+    VKPAY = 'vkpay'
 
-    #: Кнопка с приложением VK Apps
-    VKAPPS = "open_app"
+    #: Кнопка VK Mini Apps
+    VKAPPS = 'open_app'
 
-    #: Кнопка с ссылкой
-    OPENLINK = "open_link"
+    #: Кнопка со ссылкой
+    OPENLINK = 'open_link'
 
     #: Callback-кнопка
-    CALLBACK = "callback"
+    CALLBACK = 'callback'
 
 
-class VkKeyboard(object):
-    """ Класс для создания клавиатуры для бота (https://vk.com/dev/bots_docs_3)
-    :param one_time: Если True, клавиатура исчезнет после нажатия на кнопку
+class VkKeyboard:
+    """Конструктор клавиатуры для ботов ВКонтакте
+
+    `Документация: https://dev.vk.com/ru/api/bots/development/keyboard`
+
+    :param one_time: Скрыть клавиатуру после нажатия
     :type one_time: bool
+    :param inline: Отображать клавиатуру внутри сообщения
+    :type inline: bool
+
+    Пример создания простой клавиатуры::
+
+        from vk_api.keyboard import VkKeyboard, VkKeyboardColor
+
+        keyboard = VkKeyboard(one_time=True)
+        keyboard.add_button('Да', color=VkKeyboardColor.POSITIVE)
+        keyboard.add_button('Нет', color=VkKeyboardColor.NEGATIVE)
+        keyboard.add_line()
+        keyboard.add_button('Отмена')
+
+        vk.messages.send(
+            peer_id=user_id,
+            message='Вы уверены?',
+            keyboard=keyboard.get_keyboard(),
+            random_id=0
+        )
+
+    Пример inline-клавиатуры::
+
+        keyboard = VkKeyboard(inline=True)
+        keyboard.add_button('Кнопка 1', payload={'action': 'btn1'})
+        keyboard.add_button('Кнопка 2', payload={'action': 'btn2'})
     """
 
     __slots__ = ('one_time', 'lines', 'keyboard', 'inline')
 
-    def __init__(self, one_time=False, inline=False):
+    def __init__(self, one_time: bool = False, inline: bool = False):
         self.one_time = one_time
         self.inline = inline
         self.lines = [[]]
@@ -70,234 +99,265 @@ class VkKeyboard(object):
         self.keyboard = {
             'one_time': self.one_time,
             'inline': self.inline,
-            'buttons': self.lines
+            'buttons': self.lines,
         }
 
-    def get_keyboard(self):
-        """ Получить json клавиатуры """
+    def get_keyboard(self) -> str:
+        """Получить JSON клавиатуры для отправки в API
+
+        :return: JSON строка
+        """
         return sjson_dumps(self.keyboard)
 
     @classmethod
-    def get_empty_keyboard(cls):
-        """ Получить json пустой клавиатуры.
-        Если отправить пустую клавиатуру, текущая у пользователя исчезнет.
+    def get_empty_keyboard(cls) -> str:
+        """Получить JSON пустой клавиатуры.
+
+        Отправка пустой клавиатуры скрывает текущую у пользователя.
+
+        :return: JSON строка пустой клавиатуры
         """
         keyboard = cls()
         keyboard.keyboard['buttons'] = []
         return keyboard.get_keyboard()
 
-    def add_button(self, label, color=VkKeyboardColor.SECONDARY, payload=None):
-        """ Добавить кнопку с текстом.
-            Максимальное количество кнопок на строке - MAX_BUTTONS_ON_LINE
+    def _check_line_capacity(self) -> None:
+        """Проверить, есть ли место для кнопки в текущей строке"""
+        if len(self.lines[-1]) >= MAX_BUTTONS_ON_LINE:
+            raise ValueError(
+                f'Максимум {MAX_BUTTONS_ON_LINE} кнопок в строке. '
+                'Используйте add_line() для новой строки.'
+            )
 
-        :param label: Надпись на кнопке и текст, отправляющийся при её нажатии.
-        :type label: str
-        :param color: цвет кнопки.
-        :type color: VkKeyboardColor or str
-        :param payload: Параметр для callback api
-        :type payload: str or list or dict
+    def _check_empty_line(self) -> None:
+        """Проверить, что строка пуста (для кнопок на всю ширину)"""
+        if len(self.lines[-1]) != 0:
+            raise ValueError(
+                'Эта кнопка должна занимать всю ширину строки. '
+                'Добавьте новую строку с add_line()'
+            )
+
+    def _encode_payload(self, payload) -> Optional[str]:
+        """Закодировать payload в JSON строку"""
+        if payload is None:
+            return None
+        if isinstance(payload, str):
+            return payload
+        return sjson_dumps(payload)
+
+    def add_button(
+        self,
+        label: str,
+        color: Union[VkKeyboardColor, str] = VkKeyboardColor.SECONDARY,
+        payload=None
+    ) -> 'VkKeyboard':
+        """Добавить текстовую кнопку
+
+        :param label: Текст кнопки (также отправляется при нажатии)
+        :param color: Цвет кнопки
+        :param payload: Дополнительные данные для Callback API
+        :return: self (для цепочки вызовов)
         """
+        self._check_line_capacity()
 
-        current_line = self.lines[-1]
+        color_value = color.value if isinstance(color, VkKeyboardColor) else color
 
-        if len(current_line) >= MAX_BUTTONS_ON_LINE:
-            raise ValueError(f'Max {MAX_BUTTONS_ON_LINE} buttons on a line')
-
-        color_value = color
-
-        if isinstance(color, VkKeyboardColor):
-            color_value = color_value.value
-
-        if payload is not None and not isinstance(payload, str):
-            payload = sjson_dumps(payload)
-
-        button_type = VkKeyboardButton.TEXT.value
-
-        current_line.append({
+        self.lines[-1].append({
             'color': color_value,
             'action': {
-                'type': button_type,
-                'payload': payload,
+                'type': VkKeyboardButton.TEXT.value,
+                'payload': self._encode_payload(payload),
                 'label': label,
-            }
+            },
         })
+        return self
 
-    def add_callback_button(self, label, color=VkKeyboardColor.SECONDARY, payload=None):
-        """ Добавить callback-кнопку с текстом.
-            Максимальное количество кнопок на строке - MAX_BUTTONS_ON_LINE
+    def add_callback_button(
+        self,
+        label: str,
+        color: Union[VkKeyboardColor, str] = VkKeyboardColor.SECONDARY,
+        payload=None
+    ) -> 'VkKeyboard':
+        """Добавить callback-кнопку
 
-        :param label: Надпись на кнопке и текст, отправляющийся при её нажатии.
-        :type label: str
-        :param color: цвет кнопки.
-        :type color: VkKeyboardColor or str
-        :param payload: Параметр для callback api
-        :type payload: str or list or dict
+        :param label: Текст кнопки
+        :param color: Цвет кнопки
+        :param payload: Данные события (dict, str или None)
+        :return: self (для цепочки вызовов)
         """
+        self._check_line_capacity()
 
-        current_line = self.lines[-1]
+        color_value = color.value if isinstance(color, VkKeyboardColor) else color
 
-        if len(current_line) >= MAX_BUTTONS_ON_LINE:
-            raise ValueError(f'Max {MAX_BUTTONS_ON_LINE} buttons on a line')
-
-        color_value = color
-
-        if isinstance(color, VkKeyboardColor):
-            color_value = color_value.value
-
-        if payload is not None and not isinstance(payload, str):
-            payload = sjson_dumps(payload)
-
-        button_type = VkKeyboardButton.CALLBACK.value
-
-        current_line.append({
+        self.lines[-1].append({
             'color': color_value,
             'action': {
-                'type': button_type,
-                'payload': payload,
+                'type': VkKeyboardButton.CALLBACK.value,
+                'payload': self._encode_payload(payload),
                 'label': label,
-            }
+            },
         })
+        return self
 
-    def add_location_button(self, payload=None):
-        """ Добавить кнопку с местоположением.
-            Всегда занимает всю ширину линии.
+    def add_location_button(self, payload=None) -> 'VkKeyboard':
+        """Добавить кнопку геолокации
 
-        :param payload: Параметр для callback api
-        :type payload: str or list or dict
+        Занимает всю ширину строки.
+
+        :param payload: Дополнительные данные
+        :return: self (для цепочки вызовов)
         """
+        self._check_empty_line()
 
-        current_line = self.lines[-1]
-
-        if len(current_line) != 0:
-            raise ValueError(
-                'This type of button takes the entire width of the line'
-            )
-
-        if payload is not None and not isinstance(payload, str):
-            payload = sjson_dumps(payload)
-
-        button_type = VkKeyboardButton.LOCATION.value
-
-        current_line.append({
+        self.lines[-1].append({
             'action': {
-                'type': button_type,
-                'payload': payload
-            }
+                'type': VkKeyboardButton.LOCATION.value,
+                'payload': self._encode_payload(payload),
+            },
         })
+        return self
 
-    def add_vkpay_button(self, hash, payload=None):
-        """ Добавить кнопку с оплатой с помощью VKPay.
-            Всегда занимает всю ширину линии.
+    def add_vkpay_button(self, hash: str, payload=None) -> 'VkKeyboard':
+        """Добавить кнопку оплаты VKPay
 
-        :param hash: Параметры платежа VKPay и ID приложения
-        (в поле aid) разделённые &
-        :type hash: str
-        :param payload: Параметр для совместимости со старыми клиентами
-        :type payload: str or list or dict
+        Занимает всю ширину строки.
+
+        :param hash: Параметры платежа (amount=..&description=..&action=..&aid=..)
+        :param payload: Дополнительные данные
+        :return: self (для цепочки вызовов)
         """
+        self._check_empty_line()
 
-        current_line = self.lines[-1]
-
-        if len(current_line) != 0:
-            raise ValueError(
-                'This type of button takes the entire width of the line'
-            )
-
-        if payload is not None and not isinstance(payload, str):
-            payload = sjson_dumps(payload)
-
-        button_type = VkKeyboardButton.VKPAY.value
-
-        current_line.append({
+        self.lines[-1].append({
             'action': {
-                'type': button_type,
-                'payload': payload,
-                'hash': hash
-            }
+                'type': VkKeyboardButton.VKPAY.value,
+                'payload': self._encode_payload(payload),
+                'hash': hash,
+            },
         })
+        return self
 
-    def add_vkapps_button(self, app_id, owner_id, label, hash, payload=None):
-        """ Добавить кнопку с приложением VK Apps.
-            Всегда занимает всю ширину линии.
+    def add_vkapps_button(
+        self,
+        app_id: int,
+        owner_id: int,
+        label: str,
+        hash: str,
+        payload=None
+    ) -> 'VkKeyboard':
+        """Добавить кнопку VK Mini Apps
 
-        :param app_id: Идентификатор вызываемого приложения с типом VK Apps
-        :type app_id: int
-        :param owner_id: Идентификатор сообщества, в котором установлено
-        приложение, если требуется открыть в контексте сообщества
-        :type owner_id: int
-        :param label: Название приложения, указанное на кнопке
-        :type label: str
-        :param hash: хэш для навигации в приложении, будет передан в строке
-        параметров запуска после символа #
-        :type hash: str
-        :param payload: Параметр для совместимости со старыми клиентами
-        :type payload: str or list or dict
+        Занимает всю ширину строки.
+
+        :param app_id: ID приложения
+        :param owner_id: ID сообщества (отрицательное)
+        :param label: Название приложения на кнопке
+        :param hash: Хэш для навигации внутри приложения
+        :param payload: Дополнительные данные
+        :return: self (для цепочки вызовов)
         """
+        self._check_empty_line()
 
-        current_line = self.lines[-1]
-
-        if len(current_line) != 0:
-            raise ValueError(
-                'This type of button takes the entire width of the line'
-            )
-
-        if payload is not None and not isinstance(payload, str):
-            payload = sjson_dumps(payload)
-
-        button_type = VkKeyboardButton.VKAPPS.value
-
-        current_line.append({
+        self.lines[-1].append({
             'action': {
-                'type': button_type,
+                'type': VkKeyboardButton.VKAPPS.value,
                 'app_id': app_id,
                 'owner_id': owner_id,
                 'label': label,
-                'payload': payload,
-                'hash': hash
-            }
+                'payload': self._encode_payload(payload),
+                'hash': hash,
+            },
         })
+        return self
 
-    def add_openlink_button(self, label, link, payload=None):
-        """ Добавить кнопку с ссылкой
-            Максимальное количество кнопок на строке - MAX_BUTTONS_ON_LINE
+    def add_openlink_button(
+        self,
+        label: str,
+        link: str,
+        payload=None
+    ) -> 'VkKeyboard':
+        """Добавить кнопку-ссылку
 
-        :param label: Надпись на кнопке
-        :type label: str
-        :param link: ссылка, которую необходимо открыть по нажатию на кнопку
-        :type link: str
-        :param payload: Параметр для callback api
-        :type payload: str or list or dict
+        :param label: Текст кнопки
+        :param link: URL для открытия
+        :param payload: Дополнительные данные
+        :return: self (для цепочки вызовов)
         """
-        current_line = self.lines[-1]
+        self._check_line_capacity()
 
-        if len(current_line) >= MAX_BUTTONS_ON_LINE:
-            raise ValueError(f'Max {MAX_BUTTONS_ON_LINE} buttons on a line')
-
-        if payload is not None and not isinstance(payload, str):
-            payload = sjson_dumps(payload)
-
-        button_type = VkKeyboardButton.OPENLINK.value
-
-        current_line.append({
+        self.lines[-1].append({
             'action': {
-                'type': button_type,
+                'type': VkKeyboardButton.OPENLINK.value,
                 'link': link,
                 'label': label,
-                'payload': payload
-            }
+                'payload': self._encode_payload(payload),
+            },
         })
+        return self
 
-    def add_line(self):
-        """ Создаёт новую строку, на которой можно размещать кнопки.
-            Максимальное количество строк:
-               Стандартное отображение - MAX_DEFAULT_LINES;
-               Inline-отображение - MAX_INLINE_LINES.
+    def add_line(self) -> 'VkKeyboard':
+        """Добавить новую строку кнопок
+
+        Лимиты:
+        - Обычная клавиатура: до 10 строк
+        - Inline-клавиатура: до 6 строк
+
+        :return: self (для цепочки вызовов)
         """
-        if self.inline:
-            if len(self.lines) >= MAX_INLINE_LINES:
-                raise ValueError(f'Max {MAX_INLINE_LINES} lines for inline keyboard')
-        else:
-            if len(self.lines) >= MAX_DEFAULT_LINES:
-                raise ValueError(f'Max {MAX_DEFAULT_LINES} lines for default keyboard')
-
+        max_lines = MAX_INLINE_LINES if self.inline else MAX_DEFAULT_LINES
+        if len(self.lines) >= max_lines:
+            raise ValueError(
+                f'Максимум {max_lines} строк для '
+                f'{"inline" if self.inline else "обычной"} клавиатуры'
+            )
         self.lines.append([])
+        return self
+
+    def __len__(self) -> int:
+        return sum(len(line) for line in self.lines)
+
+    def __repr__(self) -> str:
+        button_count = len(self)
+        return (
+            f'<VkKeyboard inline={self.inline} '
+            f'one_time={self.one_time} '
+            f'buttons={button_count}>'
+        )
+
+    @classmethod
+    def from_buttons(
+        cls,
+        buttons: list,
+        one_time: bool = False,
+        inline: bool = False
+    ) -> 'VkKeyboard':
+        """Быстро создать клавиатуру из списка кнопок
+
+        :param buttons: список списков с параметрами кнопок
+            Каждый подсписок — строка; каждый элемент — dict с ключами
+            'label', 'color', 'payload' (опционально)
+        :param one_time: Скрыть после нажатия
+        :param inline: Inline-режим
+        :return: VkKeyboard
+
+        Пример::
+
+            keyboard = VkKeyboard.from_buttons([
+                [{'label': 'Кнопка 1', 'color': VkKeyboardColor.PRIMARY},
+                 {'label': 'Кнопка 2'}],
+                [{'label': 'Отмена', 'color': VkKeyboardColor.NEGATIVE}],
+            ])
+        """
+        kb = cls(one_time=one_time, inline=inline)
+
+        for i, row in enumerate(buttons):
+            if i > 0:
+                kb.add_line()
+            for btn in row:
+                kb.add_button(
+                    label=btn['label'],
+                    color=btn.get('color', VkKeyboardColor.SECONDARY),
+                    payload=btn.get('payload')
+                )
+
+        return kb
